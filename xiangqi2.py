@@ -2,6 +2,10 @@
 象棋打谱软件（单文件版，含音效，线性走法记录）
 运行：python xiangqi_pu.py
 依赖：仅标准库
+
+新增功能：
+  1. 下一步存在多个分支时，棋盘用绿色箭头 + 序号指示候选走法。
+  2. 右侧"分支选择"区为每个分支生成按钮，点击直接走该分支。
 """
 
 import os
@@ -430,29 +434,6 @@ class XiangqiBoard:
     COL_NAMES_BLACK = "１２３４５６７８９"
     NUM_CN = "一二三四五六七八九"
 
-    # def move_to_chinese(self, r1, c1, r2, c2):
-    #     p = self.grid[r1][c1]
-    #     if p is None: return "?"
-    #     red = is_red(p)
-    #     kind = p.upper()
-    #     names = {"R":"车","N":"马","B":"相" if red else "象",
-    #              "A":"仕" if red else "士","K":"帅" if red else "将",
-    #              "C":"炮","P":"兵" if red else "卒"}
-    #     if red:
-    #         col_from = self.COL_NAMES_RED[c1]
-    #         col_to = self.COL_NAMES_RED[c2]
-    #         if r1 == r2: return f"{names[kind]}{col_from}平{col_to}"
-    #         forward = r2 < r1
-    #         num = self.NUM_CN[abs(r1 - r2) - 1] if kind in "NBA" else col_to
-    #         return f"{names[kind]}{col_from}{'进' if forward else '退'}{num}"
-    #     else:
-    #         col_from = self.COL_NAMES_BLACK[c1]
-    #         col_to = self.COL_NAMES_BLACK[c2]
-    #         if r1 == r2: return f"{names[kind]}{col_from}平{col_to}"
-    #         forward = r2 > r1
-    #         num = self.NUM_CN[abs(r1 - r2) - 1] if kind in "NBA" else col_to
-    #         return f"{names[kind]}{col_from}{'进' if forward else '退'}{num}"
-
     def move_to_chinese(self, r1, c1, r2, c2):
         """
         将一步走法转换为中文记谱。
@@ -473,13 +454,11 @@ class XiangqiBoard:
         }
         name = names[kind]
 
-        # 列名: 红方从右往左为 一~九, 黑方从左往右为 1~9
         cols = self.COL_NAMES_RED if red else self.COL_NAMES_BLACK
         col_from = cols[c1]
         col_to = cols[c2]
 
         # ---------- 1. 计算"前/后/中"前缀 ----------
-        # 找出与起点棋子同方、同种、同列的所有棋子所在行
         same_col = []
         for r in range(len(self.grid)):
             q = self.grid[r][c1]
@@ -488,12 +467,11 @@ class XiangqiBoard:
 
         prefix = name
         if len(same_col) > 1:
-            # 红方"前"= 行号小(靠近对方); 黑方"前"= 行号大
             same_col.sort()
             if red:
-                ordered = same_col            # 行号小 -> 前
+                ordered = same_col
             else:
-                ordered = same_col[::-1]      # 行号大 -> 前
+                ordered = same_col[::-1]
             idx = ordered.index(r1)
             n = len(ordered)
             if n == 2:
@@ -501,30 +479,25 @@ class XiangqiBoard:
             elif n == 3:
                 tag = ["前", "中", "后"][idx]
             else:
-                # 4 个及以上(理论上仅兵/卒可能), 用"前/二/三/.../后"
                 if idx == 0:
                     tag = "前"
                 elif idx == n - 1:
                     tag = "后"
                 else:
                     tag = self.NUM_CN[idx - 1]
-            # 叠子时, 记谱用"前/后+棋子名", 不再写起始列
             prefix = tag + name
-            col_from = None  # 表示不需要再写起始列
+            col_from = None
 
         # ---------- 2. 生成走法描述 ----------
         if r1 == r2:
-            # 平移
             body = f"平{col_to}"
         else:
             forward = (r2 < r1) if red else (r2 > r1)
             direction = "进" if forward else "退"
 
             if kind in ("N", "B", "A"):
-                # 斜走棋子: 进/退 + 目标列
                 body = f"{direction}{col_to}"
             else:
-                # 直走棋子(车/炮/兵/将): 进/退 + 格数
                 steps = abs(r1 - r2)
                 body = f"{direction}{self.NUM_CN[steps - 1]}"
 
@@ -533,7 +506,6 @@ class XiangqiBoard:
             return f"{prefix}{body}"
         else:
             return f"{prefix}{col_from}{body}"
-
 
     @staticmethod
     def coord_to_uci(r1, c1, r2, c2):
@@ -566,7 +538,7 @@ class XiangqiUI:
     def __init__(self, root):
         self.root = root
         self.root.title("象棋打谱软件")
-        self.root.geometry("1080x860")
+        self.root.geometry("1080x900")
 
         self.tree = GameTree()
         self.tree.root.fen = self.tree.initial_fen
@@ -588,6 +560,9 @@ class XiangqiUI:
         # 主线选择 + 走法点击映射
         self.mainline_choice = {}
         self._move_tag_map = {}
+
+        # 分支选择缓存：[(idx, node, (r1,c1,r2,c2)), ...]
+        self.branch_moves = []
 
         self._build_ui()
         self.refresh()
@@ -679,6 +654,19 @@ class XiangqiUI:
         tk.Button(row5, text="试听", command=lambda: self.sounds and self.sounds.play("move")
                   ).pack(side=tk.LEFT, padx=2)
 
+        # ---------- 新增：分支选择区 ----------
+        self.branch_frame = tk.LabelFrame(right, text="分支选择（下一步候选走法）")
+        self.branch_frame.pack(fill=tk.X, padx=6, pady=6)
+
+        self.branch_hint = tk.Label(
+            self.branch_frame, text="当前无分支",
+            anchor="w", fg="#888888",
+        )
+        self.branch_hint.pack(fill=tk.X, padx=4, pady=2)
+
+        self.branch_btn_frame = tk.Frame(self.branch_frame)
+        self.branch_btn_frame.pack(fill=tk.X, padx=4, pady=4)
+
         self.status = tk.Label(self.root, text="就绪", anchor="w", bd=1, relief=tk.SUNKEN)
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
@@ -742,8 +730,111 @@ class XiangqiUI:
                 self.canvas.create_oval(x2 - 6, y2 - 6, x2 + 6, y2 + 6,
                                         fill="#00cc00", outline="")
 
+        # 分支箭头
+        self._draw_branch_arrows()
+
+    # ---------- 分支箭头绘制 ----------
+    def _draw_branch_arrows(self):
+        """下一步存在多个分支时，用绿色箭头 + 序号指示每个候选走法。"""
+        if not self.branch_moves:
+            return
+        for idx, node, (r1, c1, r2, c2) in self.branch_moves:
+            x1, y1 = self.board_pos(r1, c1)
+            x2, y2 = self.board_pos(r2, c2)
+
+            # 绿色箭头
+            self.canvas.create_line(
+                x1, y1, x2, y2,
+                arrow=tk.LAST, arrowshape=(16, 20, 6),
+                fill="#00aa00", width=3, smooth=False,
+            )
+
+            # 序号圆圈（中点偏移一点）
+            mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+            off_x = -14 if x2 >= x1 else 14
+            off_y = -14 if y2 >= y1 else 14
+            cx, cy = mx + off_x, my + off_y
+            rad = 11
+            self.canvas.create_oval(
+                cx - rad, cy - rad, cx + rad, cy + rad,
+                fill="#00cc00", outline="#006600", width=2,
+            )
+            self.canvas.create_text(
+                cx, cy, text=str(idx + 1),
+                font=("Arial", 10, "bold"), fill="white",
+            )
+
+    def _collect_branches(self):
+        """收集当前节点下一步的所有候选走法。"""
+        self.branch_moves = []
+        node = self.current_node
+        if len(node.children) <= 1:
+            return
+        for i, ch in enumerate(node.children):
+            if not ch.move:
+                continue
+            try:
+                r1, c1, r2, c2 = XiangqiBoard.uci_to_coord(ch.move)
+            except Exception:
+                continue
+            self.branch_moves.append((i, ch, (r1, c1, r2, c2)))
+
+    # ---------- 分支按钮 ----------
+    def _refresh_branch_buttons(self):
+        """根据当前节点的子节点，重建分支按钮。"""
+        for w in self.branch_btn_frame.winfo_children():
+            w.destroy()
+
+        node = self.current_node
+        if len(node.children) <= 1:
+            self.branch_hint.config(
+                text="当前无分支" if not node.children else "下一步只有唯一走法",
+                fg="#888888",
+            )
+            return
+
+        self.branch_hint.config(
+            text=f"下一步有 {len(node.children)} 种走法，点击按钮直接走：",
+            fg="#006600",
+        )
+
+        circled = "①②③④⑤⑥⑦⑧⑨⑩"
+        for i, ch in enumerate(node.children):
+            if not ch.move:
+                continue
+            try:
+                r1, c1, r2, c2 = XiangqiBoard.uci_to_coord(ch.move)
+            except Exception:
+                continue
+            pb = XiangqiBoard(ch.parent.fen)
+            move_text = pb.move_to_chinese(r1, c1, r2, c2)
+
+            mark = circled[i] if i < len(circled) else f"({i+1})"
+
+            btn = tk.Button(
+                self.branch_btn_frame,
+                text=f"{mark} {move_text}",
+                anchor="w",
+                fg="#006600",
+                command=lambda n=ch: self._jump_to_node(n),
+            )
+            btn.pack(fill=tk.X, pady=1)
+
     # ---------- 交互 ----------
     def on_click(self, event):
+        # 优先判断是否点击了分支序号圆圈
+        if self.branch_moves:
+            for idx, node, (r1, c1, r2, c2) in self.branch_moves:
+                x1, y1 = self.board_pos(r1, c1)
+                x2, y2 = self.board_pos(r2, c2)
+                mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                off_x = -14 if x2 >= x1 else 14
+                off_y = -14 if y2 >= y1 else 14
+                cx, cy = mx + off_x, my + off_y
+                if (event.x - cx) ** 2 + (event.y - cy) ** 2 <= 13 ** 2:
+                    self._jump_to_node(node)
+                    return
+
         c = round((event.x - self.MARGIN) / self.CELL)
         r = round((event.y - self.MARGIN) / self.CELL)
         if not (0 <= r < 10 and 0 <= c < 9):
@@ -830,7 +921,7 @@ class XiangqiUI:
         if not self.current_node.children:
             return
         if len(self.current_node.children) > 1:
-            messagebox.showinfo("提示", "当前存在多个分叉，请在走法记录中点击选择")
+            messagebox.showinfo("提示", "当前存在多个分叉，请点击右侧分支按钮或走法记录选择")
             return
         self.current_node = self.current_node.children[0]
         self.board = XiangqiBoard(self.current_node.fen)
@@ -853,9 +944,11 @@ class XiangqiUI:
 
     # ---------- 刷新 ----------
     def refresh(self):
+        self._collect_branches()
         self.draw_board()
         self._render_movetext()
         self._refresh_comment()
+        self._refresh_branch_buttons()
         self._refresh_status()
 
     # ---------- 线性走法记录 ----------
@@ -874,7 +967,6 @@ class XiangqiUI:
 
         path_ids = {n.id for n in self.current_node.get_path_from_root()}
 
-        # 根节点：不产生走法，进入主线
         main = self._main_child(self.tree.root)
         if main is None:
             self.movetext.insert(tk.END, "（空棋谱，点击棋盘开始走子）", "comment")
@@ -901,7 +993,6 @@ class XiangqiUI:
             self._move_tag_map[tag] = node
             self.movetext.insert(tk.END, " ")
 
-            # 分叉
             main_child = self._main_child(node)
             for ch in node.children:
                 if ch is main_child:
@@ -974,10 +1065,7 @@ class XiangqiUI:
         self._update_last_move()
         self.selected = None
         self.legal_targets = []
-        self.draw_board()
-        self._refresh_comment()
-        self._refresh_status()
-        self._render_movetext()
+        self.refresh()
 
     # ---------- 备注 ----------
     def _refresh_comment(self):
@@ -1019,18 +1107,16 @@ class XiangqiUI:
             self.status.config(text="已播放到末尾")
             return
         if len(self.current_node.children) > 1:
-            self.status.config(text="⚠ 存在分叉，请在走法记录中选择分支后继续")
+            self.status.config(text="⚠ 存在分叉，请点击右侧分支按钮选择分支后继续")
             self.autoplay = False
             self.autoplay_btn.config(text="▶ 自动播放")
+            self.refresh()
             return
 
         self.current_node = self.current_node.children[0]
         self.board = XiangqiBoard(self.current_node.fen)
         self._update_last_move()
-        self.draw_board()
-        self._render_movetext()
-        self._refresh_comment()
-        self._refresh_status()
+        self.refresh()
 
         delay = int(self.autoplay_interval.get() * 1000)
         self.root.after(delay, self._autoplay_loop)
