@@ -69,6 +69,36 @@ class SoundBank:
             out.append(v * env * attack * volume)
         return out
 
+    def _synth(self, partials, dur, volume=0.5, decay_rate=6.0,
+               attack=0.005, noise_amt=0.0):
+        """
+        以多个正弦分音叠加合成更柔和的音色。
+        partials: [(freq, amp), ...]  amp 为相对权重
+        noise_amt: 起始瞬态噪声占比（0~1），用于增加"木质"敲击感
+        """
+        n = int(self.SAMPLE_RATE * dur)
+        out = [0.0] * n
+        atk_n = int(self.SAMPLE_RATE * attack)
+        for i in range(n):
+            t = i / self.SAMPLE_RATE
+            v = 0.0
+            for freq, amp in partials:
+                v += amp * math.sin(2 * math.pi * freq * t)
+            env = math.exp(-decay_rate * t / dur) if decay_rate > 0 else 1.0
+            a = min(1.0, i / (atk_n + 1))
+            out[i] = v * env * a * volume
+        # 叠加起始瞬态噪声，模拟木棋子落子瞬间的"咔"声
+        if noise_amt > 0:
+            burst_len = max(1, int(self.SAMPLE_RATE * 0.008))
+            for i in range(min(burst_len, n)):
+                env = math.exp(-40 * i / burst_len)
+                out[i] += noise_amt * env * random.uniform(-1, 1) * volume
+        # 归一化避免过载
+        peak = max((abs(x) for x in out), default=1.0)
+        if peak > 1.0:
+            out = [x / peak for x in out]
+        return out
+
     def _mix(self, *tracks):
         n = max(len(t) for t in tracks)
         out = [0.0] * n
@@ -87,20 +117,54 @@ class SoundBank:
         return [0.0] * int(self.SAMPLE_RATE * dur)
 
     def _build_all(self):
-        move = self._concat(self._tone(880, 0.06, volume=0.4, wave_type="square"),
-                            self._silence(0.02))
-        cap1 = self._tone(220, 0.08, volume=0.6, wave_type="noise")
-        cap2 = self._tone(660, 0.10, volume=0.4, wave_type="square")
-        capture = self._mix(cap1, self._concat(cap2, self._silence(0.02)))
-        check = self._concat(self._tone(1200, 0.10, volume=0.5),
-                             self._silence(0.03),
-                             self._tone(1600, 0.14, volume=0.5))
-        illegal = self._tone(120, 0.20, volume=0.5, wave_type="square")
-        mate = self._concat(self._tone(1000, 0.12, volume=0.5),
-                            self._tone(700, 0.12, volume=0.5),
-                            self._tone(400, 0.25, volume=0.5))
-        data = {"move": move, "capture": capture, "check": check,
-                "illegal": illegal, "mate": mate}
+        # 走子：木质轻敲，基频 A4(440) + 八度泛音，短促柔和
+        move = self._synth(
+            partials=[(440, 1.0), (880, 0.35), (1320, 0.12)],
+            dur=0.12, volume=0.40, decay_rate=9.0, noise_amt=0.25,
+        )
+
+        # 吃子：更厚重的敲击 + 低频体感，叠加短噪声瞬态
+        cap_body = self._synth(
+            partials=[(196, 1.0), (294, 0.5), (392, 0.3)],
+            dur=0.20, volume=0.55, decay_rate=7.0, noise_amt=0.35,
+        )
+        cap_bell = self._synth(
+            partials=[(587, 1.0), (1175, 0.3)],
+            dur=0.18, volume=0.22, decay_rate=8.0,
+        )
+        capture = self._mix(cap_body, cap_bell)
+
+        # 将军：上行二音铃响 (E5 -> A5)，柔和正弦
+        chk1 = self._synth(
+            partials=[(659, 1.0), (1318, 0.25)],
+            dur=0.16, volume=0.40, decay_rate=7.0,
+        )
+        chk2 = self._synth(
+            partials=[(880, 1.0), (1760, 0.25)],
+            dur=0.22, volume=0.42, decay_rate=6.5,
+        )
+        check = self._concat(chk1, self._silence(0.04), chk2)
+
+        # 非法：低沉闷响 (A2 ~110Hz)，不刺耳
+        illegal = self._synth(
+            partials=[(110, 1.0), (165, 0.4)],
+            dur=0.22, volume=0.45, decay_rate=5.5, noise_amt=0.15,
+        )
+
+        # 绝杀：下行三音收束 (A5 -> E5 -> A4)，哀而不噪
+        m1 = self._synth([(880, 1.0), (1320, 0.3)], 0.16, 0.42, 7.0)
+        m2 = self._synth([(659, 1.0), (988, 0.3)],  0.16, 0.42, 7.0)
+        m3 = self._synth([(440, 1.0), (660, 0.3)],  0.30, 0.46, 5.5)
+        mate = self._concat(m1, self._silence(0.03), m2,
+                            self._silence(0.03), m3)
+
+        # 使用版本化文件名，避免命中旧缓存导致音色不更新
+        data = {"move_v2": move, "capture_v2": capture, "check_v2": check,
+                "illegal_v2": illegal, "mate_v2": mate}
+        # 对外仍用原名
+        alias = {"move_v2": "move", "capture_v2": "capture",
+                 "check_v2": "check", "illegal_v2": "illegal",
+                 "mate_v2": "mate"}
         for name, samples in data.items():
             path = os.path.join(self.cache_dir, f"{name}.wav")
             if not os.path.exists(path):
@@ -108,7 +172,7 @@ class SoundBank:
                     self._write_wav(path, samples)
                 except Exception:
                     continue
-            self.files[name] = path
+            self.files[alias[name]] = path
 
     def play(self, name):
         if not self.enabled:
@@ -548,6 +612,7 @@ class XiangqiUI:
         self.selected = None
         self.legal_targets = []
         self.last_move = None
+        self.flipped = False  # 棋盘是否翻转（黑方在下方视角）
 
         self.autoplay = False
         self.autoplay_interval = tk.DoubleVar(value=1.5)
@@ -617,6 +682,19 @@ class XiangqiUI:
         self.movetext.tag_bind("move_active", "<Leave>",
                                lambda e: self.movetext.config(cursor="arrow"))
 
+        # ---------- 分支选择区（移到走法记录下方，便于点击）----------
+        self.branch_frame = tk.LabelFrame(right, text="分支选择（下一步候选走法）")
+        self.branch_frame.pack(fill=tk.X, padx=6, pady=(4, 6))
+
+        self.branch_hint = tk.Label(
+            self.branch_frame, text="当前无分支",
+            anchor="w", fg="#888888",
+        )
+        self.branch_hint.pack(fill=tk.X, padx=4, pady=2)
+
+        self.branch_btn_frame = tk.Frame(self.branch_frame)
+        self.branch_btn_frame.pack(fill=tk.X, padx=4, pady=4)
+
         tk.Label(right, text="当前局面备注", anchor="w").pack(fill=tk.X, padx=6)
         self.comment_text = tk.Text(right, height=5, wrap=tk.WORD)
         self.comment_text.pack(fill=tk.X, padx=6, pady=2)
@@ -629,6 +707,7 @@ class XiangqiUI:
         tk.Button(row1, text="◀ 上一步", command=self.go_back).pack(side=tk.LEFT, padx=2)
         tk.Button(row1, text="下一步 ▶", command=self.go_forward).pack(side=tk.LEFT, padx=2)
         tk.Button(row1, text="⟲ 回到开头", command=self.go_start).pack(side=tk.LEFT, padx=2)
+        tk.Button(row1, text="⇅ 翻转棋盘", command=self.toggle_flip).pack(side=tk.LEFT, padx=2)
 
         row2 = tk.Frame(ctrl); row2.pack(fill=tk.X, pady=2)
         self.autoplay_btn = tk.Button(row2, text="▶ 自动播放", command=self.toggle_autoplay)
@@ -654,24 +733,15 @@ class XiangqiUI:
         tk.Button(row5, text="试听", command=lambda: self.sounds and self.sounds.play("move")
                   ).pack(side=tk.LEFT, padx=2)
 
-        # ---------- 新增：分支选择区 ----------
-        self.branch_frame = tk.LabelFrame(right, text="分支选择（下一步候选走法）")
-        self.branch_frame.pack(fill=tk.X, padx=6, pady=6)
-
-        self.branch_hint = tk.Label(
-            self.branch_frame, text="当前无分支",
-            anchor="w", fg="#888888",
-        )
-        self.branch_hint.pack(fill=tk.X, padx=4, pady=2)
-
-        self.branch_btn_frame = tk.Frame(self.branch_frame)
-        self.branch_btn_frame.pack(fill=tk.X, padx=4, pady=4)
-
         self.status = tk.Label(self.root, text="就绪", anchor="w", bd=1, relief=tk.SUNKEN)
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
     # ---------- 绘制 ----------
     def board_pos(self, r, c):
+        # 翻转时把坐标做 180° 旋转（行列同时翻转）
+        if self.flipped:
+            c = 8 - c
+            r = 9 - r
         return self.MARGIN + c * self.CELL, self.MARGIN + r * self.CELL
 
     def draw_board(self):
@@ -691,9 +761,11 @@ class XiangqiUI:
         for (r1, r2) in [(0, 2), (7, 9)]:
             self.canvas.create_line(M + 3 * C, M + r1 * C, M + 5 * C, M + r2 * C, width=1.5)
             self.canvas.create_line(M + 5 * C, M + r1 * C, M + 3 * C, M + r2 * C, width=1.5)
-        self.canvas.create_text(M + 2 * C, M + 4.5 * C, text="楚 河",
+        # 翻转后楚河/漢界左右对调，保持各自仍在原本的"半边"
+        left_text, right_text = ("漢 界", "楚 河") if self.flipped else ("楚 河", "漢 界")
+        self.canvas.create_text(M + 2 * C, M + 4.5 * C, text=left_text,
                                 font=("KaiTi", 20), fill="#8b4513")
-        self.canvas.create_text(M + 6 * C, M + 4.5 * C, text="漢 界",
+        self.canvas.create_text(M + 6 * C, M + 4.5 * C, text=right_text,
                                 font=("KaiTi", 20), fill="#8b4513")
 
         if self.last_move:
@@ -837,6 +909,10 @@ class XiangqiUI:
 
         c = round((event.x - self.MARGIN) / self.CELL)
         r = round((event.y - self.MARGIN) / self.CELL)
+        # 屏幕坐标 -> 实际棋盘坐标（翻转时反向换算）
+        if self.flipped:
+            c = 8 - c
+            r = 9 - r
         if not (0 <= r < 10 and 0 <= c < 9):
             return
         p = self.board.grid[r][c]
@@ -1229,6 +1305,15 @@ class XiangqiUI:
         if self.sounds:
             self.sounds.enabled = self.sound_var.get()
         self.status.config(text="音效：" + ("开" if self.sound_var.get() else "关"))
+
+    # ---------- 棋盘翻转 ----------
+    def toggle_flip(self):
+        self.flipped = not self.flipped
+        # 翻转后清除选中状态，避免视觉错位
+        self.selected = None
+        self.legal_targets = []
+        self.refresh()
+        self.status.config(text="棋盘已" + ("翻转（黑方视角）" if self.flipped else "恢复（红方视角）"))
 
 
 # ============================================================
