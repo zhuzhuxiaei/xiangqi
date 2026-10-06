@@ -66,12 +66,17 @@ jobs:
           BUILD_SDK=$HOME/.buildozer/android/platform/android-sdk
           RUNNER_SDK=/usr/local/lib/android/sdk
           mkdir -p $BUILD_SDK
-          # 把 runner 自带 SDK 的子目录符号链接到 buildozer 期望位置，避免重新下载
+          # 把 runner 自带 SDK 的子目录符号链接到 buildozer 期望位置
           for d in cmdline-tools platform-tools build-tools platforms ndk-bundle; do
             if [ -d "$RUNNER_SDK/$d" ]; then
               ln -sfn "$RUNNER_SDK/$d" "$BUILD_SDK/$d"
             fi
           done
+          # buildozer 旧逻辑期望 sdkmanager 在 tools/bin/sdkmanager（已废弃布局）
+          # 创建 tools/bin/ 目录并把 sdkmanager 链接过去
+          mkdir -p $BUILD_SDK/tools/bin
+          ln -sfn "$RUNNER_SDK/cmdline-tools/latest/bin/sdkmanager" "$BUILD_SDK/tools/bin/sdkmanager"
+          ln -sfn "$RUNNER_SDK/cmdline-tools/latest/bin/avdmanager" "$BUILD_SDK/tools/bin/avdmanager" 2>/dev/null || true
           # 预写入已知 license hash（覆盖 build-tools 31-37 等版本）
           mkdir -p $BUILD_SDK/licenses
           printf "\n8933bad161af4178b11829d476d49d6d4d8b2c62\n24333f8a63b6825ea9c5514f83c28289b004d1fee\nd56f6127a7c0faae84f60ceab4d5e8a6\n" > $BUILD_SDK/licenses/android-sdk-license
@@ -81,9 +86,9 @@ jobs:
           printf "\n33b6a2b6c077a910e60d35e6cefd3df6\n" > $BUILD_SDK/licenses/android-sdk-arm-dbt-license
           # 接受 runner SDK 所有 licenses（兜底）
           yes | $RUNNER_SDK/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          # 验证 sdkmanager 可达
-          ls -la $BUILD_SDK/cmdline-tools/latest/bin/sdkmanager
-          echo "OK: sdkmanager ready at $BUILD_SDK/cmdline-tools/latest/bin/sdkmanager"
+          # 验证旧路径 sdkmanager 可达
+          ls -la $BUILD_SDK/tools/bin/sdkmanager
+          echo "OK: sdkmanager ready at old-path tools/bin/sdkmanager"
 
       - name: Build APK
         working-directory: android
