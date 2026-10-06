@@ -1,0 +1,11 @@
+build/
+dist/
+bin/
+*.apk
+*.aab
+__pycache__/
+*.pyc
+.fonts/
+*.ttc
+*.ttf
+!fonts/README.txt
