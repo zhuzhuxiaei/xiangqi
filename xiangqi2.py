@@ -732,6 +732,15 @@ class XiangqiUI:
                        command=self.toggle_sound).pack(side=tk.LEFT, padx=2)
         tk.Button(row5, text="试听", command=lambda: self.sounds and self.sounds.play("move")
                   ).pack(side=tk.LEFT, padx=2)
+        tk.Button(row5, text="🔗 关联.xq", command=self.associate_xq_file
+                  ).pack(side=tk.LEFT, padx=2)
+
+        # 快捷键提示
+        tk.Label(ctrl, text="快捷键: ←/→ 上下步  Home 开头  Space 自动播放  "
+                           "F 翻转  Ctrl+S 保存  Ctrl+O 打开  Del 删分支  "
+                           "M 主线  Esc 取消选中",
+                 anchor="w", fg="#666666", wraplength=300,
+                 font=("Microsoft YaHei", 8)).pack(fill=tk.X, padx=4, pady=(4, 2))
 
         self.status = tk.Label(self.root, text="就绪", anchor="w", bd=1, relief=tk.SUNKEN)
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
@@ -1221,6 +1230,10 @@ class XiangqiUI:
             filetypes=[("象棋棋谱", "*.xq"), ("JSON", "*.json")],
         )
         if not fp: return
+        self.load_from_path(fp)
+
+    def load_from_path(self, fp):
+        """从给定路径加载棋谱（不弹对话框）。供命令行启动 / 双击 .xq 调用。"""
         try:
             self.tree = GameTree.load(fp)
             self.current_node = self.tree.root
@@ -1231,6 +1244,7 @@ class XiangqiUI:
             self.mainline_choice = {}
             self.refresh()
             self.status.config(text=f"已加载 {fp}")
+            self.root.title(f"象棋打谱软件 - {os.path.basename(fp)}")
         except Exception as e:
             messagebox.showerror("加载失败", str(e))
 
@@ -1315,14 +1329,108 @@ class XiangqiUI:
         self.refresh()
         self.status.config(text="棋盘已" + ("翻转（黑方视角）" if self.flipped else "恢复（红方视角）"))
 
+    # ---------- 快捷键 ----------
+    def bind_shortcuts(self, root):
+        """绑定全局快捷键。单字母快捷键在文本框聚焦时不触发，避免误输入。"""
+        def is_typing(widget):
+            return isinstance(widget, (tk.Text, tk.Entry, ttk.Entry, tk.Spinbox))
+
+        def guard(fn):
+            def wrapped(e):
+                if is_typing(e.widget):
+                    return
+                try:
+                    fn()
+                except Exception:
+                    pass
+            return wrapped
+
+        root.bind("<Left>",      lambda e: self.go_back())
+        root.bind("<Right>",     lambda e: self.go_forward())
+        root.bind("<Home>",      lambda e: self.go_start())
+        root.bind("<space>",     lambda e: self.toggle_autoplay())
+        root.bind("<Key-f>",     guard(self.toggle_flip))
+        root.bind("<Key-F>",     guard(self.toggle_flip))
+        root.bind("<Key-m>",     guard(self.set_mainline))
+        root.bind("<Key-M>",     guard(self.set_mainline))
+        root.bind("<Control-s>", lambda e: self.save_game())
+        root.bind("<Control-S>", lambda e: self.save_game())
+        root.bind("<Control-o>", lambda e: self.load_game())
+        root.bind("<Control-O>", lambda e: self.load_game())
+        root.bind("<Delete>",    guard(self.delete_branch))
+        root.bind("<Escape>",    lambda e: self._cancel_selection())
+
+    def _cancel_selection(self):
+        """取消当前选中棋子。"""
+        self.selected = None
+        self.legal_targets = []
+        self.draw_board()
+
+    # ---------- 关联 .xq 文件（Windows 双击打开）----------
+    def associate_xq_file(self):
+        """在 Windows 注册表中注册 .xq 扩展名，使双击即可用本程序打开。"""
+        if not sys.platform.startswith("win"):
+            messagebox.showinfo("提示", "文件关联仅在 Windows 下支持。")
+            return
+
+        try:
+            import winreg
+        except Exception:
+            messagebox.showerror("错误", "无法导入 winreg 模块")
+            return
+
+        # 本脚本绝对路径（用 pythonw 启动，避免弹出黑色控制台窗口）
+        script_path = os.path.abspath(__file__)
+        exe_path = _which_cmd("pythonw") or _which_cmd("python") or sys.executable
+        # 构造调用命令
+        if exe_path.lower().endswith(("python.exe", "pythonw.exe")):
+            cmd = f'"{exe_path}" "{script_path}" "%1"'
+        else:
+            cmd = f'"{exe_path}" "{script_path}" "%1"'
+
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r".xq") as key:
+                winreg.SetValueEx(key, None, 0, winreg.REG_SZ, "XiangqiGameRecord")
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                                 r"XiangqiGameRecord") as key:
+                winreg.SetValueEx(key, None, 0, winreg.REG_SZ, "象棋棋谱文件")
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                                 r"XiangqiGameRecord\DefaultIcon") as key:
+                winreg.SetValueEx(key, None, 0, winreg.REG_SZ, f'"{exe_path}",0')
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                                 r"XiangqiGameRecord\shell\open\command") as key:
+                winreg.SetValueEx(key, None, 0, winreg.REG_SZ, cmd)
+            messagebox.showinfo(
+                "关联成功",
+                f"已将 .xq 文件关联到本程序。\n\n"
+                f"调用命令: {cmd}\n\n"
+                "此后双击 .xq 文件即可启动本软件并自动加载棋谱。",
+            )
+            self.status.config(text=".xq 文件关联已设置")
+        except Exception as e:
+            messagebox.showerror("关联失败", str(e))
+
 
 # ============================================================
 # 入口
 # ============================================================
 
 def main():
+    # 支持命令行参数：xiangqi2.py <file.xq>  (双击 .xq 文件时由系统传入)
+    args = sys.argv[1:]
+    initial_file = None
+    for a in args:
+        if isinstance(a, str) and os.path.isfile(a) and a.lower().endswith((".xq", ".json")):
+            initial_file = a
+            break
+
     root = tk.Tk()
     app = XiangqiUI(root)
+    # 绑定快捷键
+    app.bind_shortcuts(root)
+    # 如有命令行传入的棋谱文件，启动后立即加载
+    if initial_file:
+        root.after(50, lambda: app.load_from_path(initial_file))
     root.mainloop()
 
 

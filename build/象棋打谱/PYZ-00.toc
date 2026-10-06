@@ -1,4 +1,4 @@
-('C:\\Users\\liulingyi\\Desktop\\新建文件夹\\build\\象棋打谱\\PYZ-00.pyz',
+('C:\\Users\\liulingyi\\Desktop\\象棋\\build\\象棋打谱\\PYZ-00.pyz',
  [('__future__',
    'C:\\Users\\liulingyi\\AppData\\Local\\Python\\pythoncore-3.14-64\\Lib\\__future__.py',
    'PYMODULE'),
