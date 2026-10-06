@@ -61,9 +61,25 @@ jobs:
           restore-keys: |
             buildozer-project-${{ runner.os }}-
 
+      - name: Pre-accept Android SDK licenses
+        run: |
+          mkdir -p $HOME/.buildozer/android/platform/android-sdk/licenses
+          # 已知的 license hash（覆盖 build-tools 31-37 等版本）
+          printf "\n8933bad161af4178b11829d476d49d6d4d8b2c62\n24333f8a63b6825ea9c5514f83c28289b004d1fee\nd56f6127a7c0faae84f60ceab4d5e8a6\n" > $HOME/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
+          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n" > $HOME/.buildozer/android/platform/android-sdk/licenses/android-sdk-preview-license
+          printf "\nd975f751698a5dc0cb2c6a63260843b6\n" > $HOME/.buildozer/android/platform/android-sdk/licenses/android-sdk-arm-dbt-license
+          printf "\n0afb6751e1f8b00a434c2e04c5d5ca16\n" > $HOME/.buildozer/android/platform/android-sdk/licenses/android-googletv-license
+          printf "\n33b6a2b6c077a910e60d35e6cefd3df6\n" > $HOME/.buildozer/android/platform/android-sdk/licenses/android-sdk-arm-dbt-license
+          ls -la $HOME/.buildozer/android/platform/android-sdk/licenses/
+
       - name: Build APK
         working-directory: android
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
+          # 接受 runner 自带 SDK 的所有 licenses（兜底）
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           buildozer android debug
           # 打包 release 需要签名密钥，默认只打 debug
           # 如需 release，配置 ANDROID_KEYSTORE_* 环境变量后运行 buildozer android release
