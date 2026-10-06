@@ -86,8 +86,15 @@ jobs:
           printf "\n33b6a2b6c077a910e60d35e6cefd3df6\n" > $BUILD_SDK/licenses/android-sdk-arm-dbt-license
           # 接受 runner SDK 所有 licenses（兜底）
           yes | $RUNNER_SDK/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          # 安装 buildozer.spec 要求的 API 33 platform 与 build-tools 33.0.0
+          yes | $RUNNER_SDK/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-33" \
+            "build-tools;33.0.0" \
+            "platform-tools" \
+            > /dev/null 2>&1 || true
           # 验证旧路径 sdkmanager 可达
           ls -la $BUILD_SDK/tools/bin/sdkmanager
+          ls -la $BUILD_SDK/platforms/android-33 2>/dev/null && echo "OK: android-33 platform installed"
           echo "OK: sdkmanager ready at old-path tools/bin/sdkmanager"
 
       - name: Build APK
