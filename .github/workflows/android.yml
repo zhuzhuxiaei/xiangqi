@@ -1,0 +1,86 @@
+name: Android APK Build
+
+# 触发条件：push 到 main/master、打 tag v*、手动 workflow_dispatch
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake libtool pkg-config \
+            zlib1g-dev libffi-dev libssl-dev \
+            libltdl-dev libncurses-dev \
+            unzip zip ccache git wget ca-certificates \
+            build-essential openjdk-17-jdk
+
+      - name: Install buildozer
+        run: |
+          python -m pip install --upgrade pip
+          pip install buildozer cython==0.29.36 virtualenv
+
+      - name: Cache buildozer global
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            ~/.gradle
+          key: buildozer-global-${{ runner.os }}-${{ hashFiles('android/buildozer.spec') }}
+          restore-keys: |
+            buildozer-global-${{ runner.os }}-
+
+      - name: Cache project build
+        uses: actions/cache@v4
+        with:
+          path: |
+            android/.buildozer
+          key: buildozer-project-${{ runner.os }}-${{ hashFiles('android/buildozer.spec') }}
+          restore-keys: |
+            buildozer-project-${{ runner.os }}-
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          buildozer android debug
+          # 打包 release 需要签名密钥，默认只打 debug
+          # 如需 release，配置 ANDROID_KEYSTORE_* 环境变量后运行 buildozer android release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiangqi-debug-apk
+          path: android/bin/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload to Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/bin/*.apk
+          generate_release_notes: true
+          draft: false
+          prerelease: false

@@ -7,7 +7,7 @@ package.domain = com.example
 
 # 源码目录
 source.dir = .
-source.include_exts = py,png,jpg,ttf,tc,ttc,wav,json
+source.include_exts = py,png,jpg,ttf,tc,ttc,otf,wav,json,txt
 
 # 资源文件
 source.include_patterns = fonts/*,assets/*
@@ -15,7 +15,7 @@ source.include_patterns = fonts/*,assets/*
 # 版本
 version = 1.0
 
-# 依赖
+# 依赖（kivymd 仅在需要时启用，目前不需要以减小体积）
 requirements = python3,kivy,jnius
 
 # 朝向与全屏
@@ -28,10 +28,15 @@ android.app_intent_filters = intent_filter.xml
 # 权限
 android.permissions = VIBRATE
 
-# 不使用 pygame sdl2
-android.api = 31
+# Android 构建设置（API 33 / 最低 21 / 双 ABI）
+android.api = 33
 android.minapi = 21
 android.archs = arm64-v8a, armeabi-v7a
+android.accept_bsdlicenses = True
+
+# 桌面调试时使用本地的 Python（仅用于运行 main.py，不影响打包）
+# p4a 配置（develop 分支持持 AAB，buildozer 1.6 需要）
+p4a.branch = develop
 
 # 图标（可选，放 assets/icon.png）
 # android.icon = assets/icon.png

@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller 构建产物
+build/
+dist/
+*.exe
+*.spec.bak
+
+# Buildozer / Android 构建缓存（android/.gitignore 也已配置）
+android/.buildozer/
+android/bin/
+android/.gradle/
+
+# 引擎二进制与权重（可单独下载，体积大）
+Pikafish-*.exe
+pikafish.nnue
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
